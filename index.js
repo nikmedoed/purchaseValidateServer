@@ -10,8 +10,16 @@ const {
 } = require("./validate.js");
 const bodyParser = require("body-parser");
 
-const app = express();
+const dateFormat = {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+  second: "numeric",
+};
 
+const app = express();
 const JWTClient = new google.auth.JWT(
   account.client_email,
   null,
@@ -21,7 +29,14 @@ const JWTClient = new google.auth.JWT(
 
 app.use(bodyParser.json());
 
-app.get("/", (req, res) => {
+app.post("/", (req, res) => {
+  console.log(
+    `[${new Date().toLocaleString("ru", dateFormat)}] New validation. Plat: ${
+      req.body.platform
+    }, ver:${req.body.ver}, products:${
+      req.body.products ? req.body.products.length : 0
+    }`
+  );
   if ((platf = req.body.platform)) {
     let version = req.body.ver;
     let action = (data) => {

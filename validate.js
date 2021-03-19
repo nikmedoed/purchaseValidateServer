@@ -1,10 +1,12 @@
+const hardcoding = ["subscription", "fullcatalogue"];
+
 var sqlite3 = require("sqlite3").verbose();
 var db = new sqlite3.Database("./server.db3");
 db.serialize(function () {
   db.run(
     "CREATE TABLE IF NOT EXISTS Codes (version INTEGER, productId TEXT, key TEXT)"
   ).run(
-    "CREATE TABLE IF NOT EXISTS AndroidReceipt (productId TEXT, purchaseToken TEXT, purchaseTime NUMERIC)"
+    "CREATE TABLE IF NOT EXISTS AndroidReceipt (productId TEXT, purchaseToken TEXT, purchaseTime NUMERIC, signatureAndroid TEXT)"
   );
   // .run("CREATE TABLE IF NOT EXISTS IosReceipt (productId TEXT, purchaseToken TEXT, purchaseTime NUMERIC)");
 });
@@ -89,18 +91,18 @@ module.exports.validateReceiptAndroid = (
       if (err) {
         console.log(err);
       }
-      keys = {};
+      keys = [];
       for (const row of products) {
         if (
           rows.find((e) => {
             return e.productId == row.productId;
           })
         ) {
-          keys[row.productId] = { status: true };
+          keys.push(row.productId);
         } else {
-          keys[row.productId] = {
-            status: await validateReceiptGooglePlay(accessToken, row),
-          };
+          if (await validateReceiptGooglePlay(accessToken, row)) {
+            keys.push(row.productId);
+          }
         }
       }
       getKeys(keys, version, action);
@@ -138,26 +140,33 @@ validateReceiptGooglePlay = async (accessToken, item) => {
 
 function addChache(item) {
   db.run(
-    `INSERT into AndroidReceipt VALUES(?, ?, ?)`,
-    ["productId", "purchaseToken", "purchaseTime"].map((el) => item[el])
+    `INSERT into AndroidReceipt VALUES(?, ?, ?, ?)`,
+    ["productId", "purchaseToken", "transactionDate", "signatureAndroid"].map(
+      (el) => item[el]
+    )
   );
 }
 
 function getKeys(keys, version, clbk) {
   let check = [];
-  for (key in keys) {
-    if (keys[key].status) {
-      check.push(`productId="${key}"`);
+  for (key of keys) {
+    if (hardcoding.some((allProductWord) => key.includes(allProductWord))) {
+      check = false;
+      break;
     }
+    check.push(`productId="${key}"`);
   }
+  keys = {};
+  let checkFilter = check ? ` AND (${check.join(" OR ")})` : "";
   db.all(
     `SELECT productId, key FROM Codes WHERE ` +
-      `version=${version} AND (${check.join(" OR ")})`,
+      `version=${version}${checkFilter}`,
     (err, rows) => {
+      // console.log(rows);
       err && console.log(err);
       if (rows) {
         rows.forEach((row) => {
-          keys[row.productId].key = row.key;
+          keys[row.productId] = row.key;
         });
       }
       clbk(keys);
