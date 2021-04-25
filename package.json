@@ -6,7 +6,7 @@
   "author": "bang9dev <gusrn1423@naver.com>",
   "license": "MIT",
   "scripts": {
-    "start": "node index.js"
+    "start": "node foreverIndex.js"
   },
   "dependencies": {
     "express": "^4.17.1",

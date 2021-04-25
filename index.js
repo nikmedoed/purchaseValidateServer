@@ -86,3 +86,5 @@ app.post("/update", (req, res) => {
 });
 
 app.listen(8000);
+
+console.log("server Started");
