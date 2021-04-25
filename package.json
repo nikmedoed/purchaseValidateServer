@@ -9,7 +9,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "body-parser": "^1.19.0",
     "express": "^4.17.1",
     "forever-monitor": "^3.0.3",
     "googleapis": "^67.1.1",

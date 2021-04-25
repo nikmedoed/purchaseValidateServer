@@ -8,7 +8,6 @@ const {
   setCodes,
   getCodes,
 } = require("./validate.js");
-const bodyParser = require("body-parser");
 
 const dateFormat = {
   year: "numeric",
@@ -27,14 +26,14 @@ const JWTClient = new google.auth.JWT(
   ["https://www.googleapis.com/auth/androidpublisher"]
 );
 
-app.use(bodyParser.json());
+app.use(express.json());
 
 app.post("/", (req, res) => {
   console.log(
     `[${new Date().toLocaleString("ru", dateFormat)}] New validation. Plat: ${
       req.body.platform
     }, ver:${req.body.ver}, products:${
-      req.body.products ? req.body.products.length : 0
+      req.body.products ? req.body.products.length : "??"
     }`
   );
   if ((platf = req.body.platform)) {
@@ -54,12 +53,7 @@ app.post("/", (req, res) => {
         }
       });
     } else if (platf == "ios") {
-      val = validateReceiptIos(
-        req.body.products,
-        req.body.devMode,
-        version,
-        action
-      );
+      val = validateReceiptIos(req.body.receipt, version, action);
     } else {
       res.status(404).send("(；⌣̀_⌣́) да шо тебе надо!");
     }

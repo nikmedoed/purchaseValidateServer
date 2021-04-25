@@ -1,15 +1,40 @@
-const hardcoding = ["subscription", "fullcatalogue"];
+const checkAllProducts = (product) =>
+  ["fullcatalogue", "subscription"].some((allProductWord) =>
+    product.includes(allProductWord)
+  );
 
+const iosKey = require("./iosKey.json");
 var sqlite3 = require("sqlite3").verbose();
 var db = new sqlite3.Database("./server.db3");
 db.serialize(function () {
   db.run(
     "CREATE TABLE IF NOT EXISTS Codes (version INTEGER, productId TEXT, key TEXT)"
-  ).run(
-    "CREATE TABLE IF NOT EXISTS AndroidReceipt (productId TEXT, purchaseToken TEXT, purchaseTime NUMERIC, signatureAndroid TEXT)"
-  );
-  // .run("CREATE TABLE IF NOT EXISTS IosReceipt (productId TEXT, purchaseToken TEXT, purchaseTime NUMERIC)");
+  )
+    .run(
+      "CREATE TABLE IF NOT EXISTS AndroidReceipt (productId TEXT, purchaseToken TEXT, purchaseTime NUMERIC, signatureAndroid TEXT)"
+    )
+    .run(
+      "CREATE TABLE IF NOT EXISTS IosReceipt (receipt TEXT, products TEXT, expDate NUMERIC)"
+    );
 });
+
+function addChacheiOs(receipt, products, expDate) {
+  products = typeof products == "object" ? products.join(",") : products;
+  db.run(`INSERT into IosReceipt VALUES(?, ?, ?)`, [
+    receipt,
+    products,
+    expDate,
+  ]);
+}
+
+function addChacheAndroid(item) {
+  db.run(
+    `INSERT into AndroidReceipt VALUES(?, ?, ?, ?)`,
+    ["productId", "purchaseToken", "transactionDate", "signatureAndroid"].map(
+      (el) => item[el]
+    )
+  );
+}
 
 const fetch = require("node-fetch");
 
@@ -29,43 +54,68 @@ const fetchJsonOrThrow = async (url, receiptBody) => {
   return response.json();
 };
 
-module.exports.requestAgnosticReceiptValidationIos = async (receiptBody) => {
-  const response = await fetchJsonOrThrow(
-    "https://buy.itunes.apple.com/verifyReceipt",
-    receiptBody
+const requestAgnosticReceiptValidationIos = async (receiptBody) =>
+  fetchJsonOrThrow("https://buy.itunes.apple.com/verifyReceipt", receiptBody)
+    .catch((err) => {
+      console.log(`AppStore verification Error: ${err}`);
+    })
+    .then((response) => {
+      if ((response && response.status === 21007) || !response) {
+        return fetchJsonOrThrow(
+          "https://sandbox.itunes.apple.com/verifyReceipt",
+          receiptBody
+        );
+      }
+      return response;
+    })
+    .catch((err) => {
+      console.log(`AppStore verification SandBox Error: ${err}`);
+    });
+
+module.exports.validateReceiptIos = async (receipt, version, action) => {
+  const nowMS = Date.now(); //1619200150000
+  let products = [];
+  let expdate;
+
+  db.get(
+    `SELECT products, expDate FROM IosReceipt WHERE receipt=(?)`,
+    receipt,
+    async (err, row) => {
+      err && console.log(`get Base Ios Err: ${err}`);
+
+      if (row) {
+        products = row.products.split(",");
+        expdate = row.expDate;
+      }
+      if ((expdate && expdate < nowMS) || products.length == 0) {
+        let response = await requestAgnosticReceiptValidationIos({
+          "receipt-data": receipt,
+          password: iosKey.key,
+        });
+        if (response) {
+          products = [];
+          expdate = null;
+          for (resp of response.latest_receipt_info) {
+            let product = resp.product_id;
+            if (resp.expires_date_ms) {
+              let redms = parseInt(resp.expires_date_ms);
+              if (redms < nowMS) {
+                continue;
+              }
+              expdate = redms < expdate ? expdate : redms;
+            }
+            products.push(product);
+          }
+          products = [...new Set(products)];
+          db.serialize(function () {
+            db.run(`DELETE from IosReceipt WHERE receipt="${receipt}"`);
+            addChacheiOs(receipt, products, expdate);
+          });
+        }
+      }
+      getKeys(products, version, action);
+    }
   );
-
-  // Best practice is to check for test receipt and check sandbox instead
-  // https://developer.apple.com/documentation/appstorereceipts/verifyreceipt
-  if (
-    response &&
-    response.status === Apple.ReceiptValidationStatus.TEST_RECEIPT
-  ) {
-    const testResponse = await fetchJsonOrThrow(
-      "https://sandbox.itunes.apple.com/verifyReceipt",
-      receiptBody
-    );
-    return testResponse;
-  }
-  return response;
-};
-
-/**
- * Validate receipt for iOS.
- * @param {object} receiptBody the receipt body to send to apple server.
- * @param {boolean} isTest whether this is in test environment which is sandbox.
- * @returns {Promise<Apple.ReceiptValidationResponse | false>}
- */
-const validateReceiptIos = async (receiptBody, isTest, version) => {
-  if (isTest == null)
-    return await requestAgnosticReceiptValidationIos(receiptBody);
-
-  const url = isTest
-    ? "https://sandbox.itunes.apple.com/verifyReceipt"
-    : "https://buy.itunes.apple.com/verifyReceipt";
-  const response = await fetchJsonOrThrow(url, receiptBody);
-
-  return response;
 };
 
 /**
@@ -111,8 +161,10 @@ module.exports.validateReceiptAndroid = (
 };
 
 // TODO как-то проверять на отмены товара
-// TODO проверка актуальности подписки
-// TODO проверка продления подписки
+// TODO проверка актуальности подписки // TODO проверка продления подписки
+// По идее оба пункта проверяются гуглом, и он не выдаст продукты, что истекли
+// Но если ломанут, то надо как-то проверять, что покупка не протухла
+// Сейчас просто проверяется честность чека
 // TODO их и хранить может потребоваться иначе, или вычислять число дней до конца
 validateReceiptGooglePlay = async (accessToken, item) => {
   productId = item.productId;
@@ -132,32 +184,23 @@ validateReceiptGooglePlay = async (accessToken, item) => {
   });
   if (response.ok) {
     // console.log(await response.json());
-    addChache(item);
+    addChacheAndroid(item);
     return true;
   }
   return false;
 };
 
-function addChache(item) {
-  db.run(
-    `INSERT into AndroidReceipt VALUES(?, ?, ?, ?)`,
-    ["productId", "purchaseToken", "transactionDate", "signatureAndroid"].map(
-      (el) => item[el]
-    )
-  );
-}
-
 function getKeys(keys, version, clbk) {
   let check = [];
   for (key of keys) {
-    if (hardcoding.some((allProductWord) => key.includes(allProductWord))) {
+    if (checkAllProducts(key)) {
       check = false;
       break;
     }
-    check.push(`productId="${key}"`);
+    check.push(`"${key}"`);
   }
   keys = {};
-  let checkFilter = check ? ` AND (${check.join(" OR ")})` : "";
+  let checkFilter = check ? ` AND productId IN (${check.join(",")})` : "";
   db.all(
     `SELECT productId, key FROM Codes WHERE ` +
       `version=${version}${checkFilter}`,
