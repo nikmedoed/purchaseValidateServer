@@ -108,3 +108,7 @@ dist
 
 # TernJS port file
 .tern-port
+key_ios.json
+key_service-account.json
+key_update.json
+key_productIdSets.json

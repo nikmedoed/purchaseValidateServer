@@ -1,10 +1,21 @@
-const checkAllProducts = (product) =>
-  ["fullcatalogue", "subscription"].some((allProductWord) =>
-    product.includes(allProductWord)
-  );
+const productIdRulesSets = require("./key_productIdSets.json");
 
-const iosKey = require("./iosKey.json");
-var sqlite3 = require("sqlite3").verbose();
+const checkAllProducts = (product) => {
+  
+  for (key of Object.keys(productIdRulesSets)){
+    if (product.includes(key)){
+      return productIdRulesSets[key]
+    }
+  }  
+  return [product]
+}
+  
+
+const iosKey = require("./key_ios.json");
+const sqlite3 = require("sqlite3").verbose();
+const fetch = require("node-fetch");
+
+
 var db = new sqlite3.Database("./server.db3");
 db.serialize(function () {
   db.run(
@@ -18,6 +29,7 @@ db.serialize(function () {
     );
 });
 
+
 function addChacheiOs(receipt, products, expDate) {
   products = typeof products == "object" ? products.join(",") : products;
   db.run(`INSERT into IosReceipt VALUES(?, ?, ?)`, [
@@ -26,6 +38,7 @@ function addChacheiOs(receipt, products, expDate) {
     expDate,
   ]);
 }
+
 
 function addChacheAndroid(item) {
   db.run(
@@ -36,7 +49,6 @@ function addChacheAndroid(item) {
   );
 }
 
-const fetch = require("node-fetch");
 
 const fetchJsonOrThrow = async (url, receiptBody) => {
   const response = await fetch(url, {
@@ -190,17 +202,13 @@ validateReceiptGooglePlay = async (accessToken, item) => {
   return false;
 };
 
+
 function getKeys(keys, version, clbk) {
-  let check = [];
-  for (key of keys) {
-    if (checkAllProducts(key)) {
-      check = false;
-      break;
-    }
-    check.push(`"${key}"`);
-  }
+  let check = new Set();
+  console.log(keys)
+  keys.forEach(key => checkAllProducts(key).forEach(e => check.add(`"${e}"`)))
   keys = {};
-  let checkFilter = check ? ` AND productId IN (${check.join(",")})` : "";
+  let checkFilter =` AND productId IN (${[...check].join(",")})`;
   db.all(
     `SELECT productId, key FROM Codes WHERE ` +
       `version=${version}${checkFilter}`,
@@ -216,6 +224,7 @@ function getKeys(keys, version, clbk) {
     }
   );
 }
+
 
 module.exports.setCodes = (codes) => {
   db.serialize(function () {

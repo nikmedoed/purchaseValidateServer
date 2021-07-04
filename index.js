@@ -1,6 +1,6 @@
 const { google } = require("googleapis");
-const account = require("./service-account.json");
-const updateKey = require("./updateKey.json");
+const account = require("./key_service-account.json");
+const updateKey = require("./key_update.json");
 const express = require("express");
 const {
   validateReceiptAndroid,
