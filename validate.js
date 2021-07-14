@@ -1,20 +1,17 @@
 const productIdRulesSets = require("./key_productIdSets.json");
 
 const checkAllProducts = (product) => {
-  
-  for (key of Object.keys(productIdRulesSets)){
-    if (product.includes(key)){
-      return productIdRulesSets[key]
+  for (key of Object.keys(productIdRulesSets)) {
+    if (product.includes(key)) {
+      return productIdRulesSets[key];
     }
-  }  
-  return [product]
-}
-  
+  }
+  return [product];
+};
 
 const iosKey = require("./key_ios.json");
 const sqlite3 = require("sqlite3").verbose();
 const fetch = require("node-fetch");
-
 
 var db = new sqlite3.Database("./server.db3");
 db.serialize(function () {
@@ -29,7 +26,6 @@ db.serialize(function () {
     );
 });
 
-
 function addChacheiOs(receipt, products, expDate) {
   products = typeof products == "object" ? products.join(",") : products;
   db.run(`INSERT into IosReceipt VALUES(?, ?, ?)`, [
@@ -39,7 +35,6 @@ function addChacheiOs(receipt, products, expDate) {
   ]);
 }
 
-
 function addChacheAndroid(item) {
   db.run(
     `INSERT into AndroidReceipt VALUES(?, ?, ?, ?)`,
@@ -48,7 +43,6 @@ function addChacheAndroid(item) {
     )
   );
 }
-
 
 const fetchJsonOrThrow = async (url, receiptBody) => {
   const response = await fetch(url, {
@@ -84,6 +78,14 @@ const requestAgnosticReceiptValidationIos = async (receiptBody) =>
       console.log(`AppStore verification SandBox Error: ${err}`);
     });
 
+const findIosKey = (receipStringUTF8) => {
+  for (key of Object.keys(iosKey)) {
+    if (receipStringUTF8.includes(key)) {
+      return iosKey[key];
+    }
+  }
+};
+
 module.exports.validateReceiptIos = async (receipt, version, action) => {
   const nowMS = Date.now(); //1619200150000
   let products = [];
@@ -100,29 +102,38 @@ module.exports.validateReceiptIos = async (receipt, version, action) => {
         expdate = row.expDate;
       }
       if ((expdate && expdate < nowMS) || products.length == 0) {
-        let response = await requestAgnosticReceiptValidationIos({
-          "receipt-data": receipt,
-          password: iosKey.key,
-        });
-        if (response) {
-          products = [];
-          expdate = null;
-          for (resp of response.latest_receipt_info) {
-            let product = resp.product_id;
-            if (resp.expires_date_ms) {
-              let redms = parseInt(resp.expires_date_ms);
-              if (redms < nowMS) {
-                continue;
+        const tempIosKey = findIosKey(
+          Buffer.from(receipt, "base64").toString("utf-8")
+        );
+        if (tempIosKey) {
+          try {
+            let response = await requestAgnosticReceiptValidationIos({
+              "receipt-data": receipt,
+              password: tempIosKey,
+            });
+            if (response && response.latest_receipt_info) {
+              products = [];
+              expdate = null;
+              for (resp of response.latest_receipt_info) {
+                let product = resp.product_id;
+                if (resp.expires_date_ms) {
+                  let redms = parseInt(resp.expires_date_ms);
+                  if (redms < nowMS) {
+                    continue;
+                  }
+                  expdate = redms < expdate ? expdate : redms;
+                }
+                products.push(product);
               }
-              expdate = redms < expdate ? expdate : redms;
+              products = [...new Set(products)];
+              db.serialize(function () {
+                db.run(`DELETE from IosReceipt WHERE receipt="${receipt}"`);
+                addChacheiOs(receipt, products, expdate);
+              });
             }
-            products.push(product);
+          } catch (err) {
+            console.warn(`validateReceiptIos error ${err}`);
           }
-          products = [...new Set(products)];
-          db.serialize(function () {
-            db.run(`DELETE from IosReceipt WHERE receipt="${receipt}"`);
-            addChacheiOs(receipt, products, expdate);
-          });
         }
       }
       getKeys(products, version, action);
@@ -199,16 +210,19 @@ validateReceiptGooglePlay = async (accessToken, item) => {
     addChacheAndroid(item);
     return true;
   }
+
+  console.log(url);
   return false;
 };
 
-
 function getKeys(keys, version, clbk) {
   let check = new Set();
-  console.log(keys)
-  keys.forEach(key => checkAllProducts(key).forEach(e => check.add(`"${e}"`)))
+  console.log(keys);
+  keys.forEach((key) =>
+    checkAllProducts(key).forEach((e) => check.add(`"${e}"`))
+  );
   keys = {};
-  let checkFilter =` AND productId IN (${[...check].join(",")})`;
+  let checkFilter = ` AND productId IN (${[...check].join(",")})`;
   db.all(
     `SELECT productId, key FROM Codes WHERE ` +
       `version=${version}${checkFilter}`,
@@ -224,7 +238,6 @@ function getKeys(keys, version, clbk) {
     }
   );
 }
-
 
 module.exports.setCodes = (codes) => {
   db.serialize(function () {
